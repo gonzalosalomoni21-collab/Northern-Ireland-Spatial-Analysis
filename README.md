@@ -3,7 +3,7 @@ Análisis espacial y temporal de los cambios demográficos en Irlanda del Norte 
 
 ## Autor
 
-Gonzalo R. Salomoni
+Gonzalo Rodolfo Salomoni
 
 ## Descripción
 
@@ -45,3 +45,5 @@ Los datos utilizados proceden de:
 - OpenDataNI (límites administrativos DEA2014 y Wards)
 
 ## Reproducibilidad
+
+El código permite reproducir los análisis y figuras incluidos en el trabajo, siempre que se disponga de los conjuntos de datos originales obtenidos de las fuentes oficiales indicadas anteriormente.

@@ -1,0 +1,328 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+# -----------------------------
+# 1. MAPA WARDS 2021
+# -----------------------------
+
+wards2021 <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/osni_open_data_largescale_boundaries_wards_2012.geojson",
+  quiet = TRUE
+)
+
+identity_2021_wards <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/census-2021_identidad.xlsx",
+  sheet = "Ward",
+  skip = 7
+) %>%
+  mutate(
+    across(
+      -c(Geography, `Geography code`),
+      as.numeric
+    )
+  ) %>%
+  transmute(
+    ward = Geography,
+    ward_code = `Geography code`,
+
+    british =
+      `British only` +
+      `British and Irish only` +
+      `British and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    irish =
+      `Irish only` +
+      `British and Irish only` +
+      `Irish and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    northern_irish =
+      `Northern Irish only` +
+      `British and Northern Irish only` +
+      `Irish and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    identidad = case_when(
+      british == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad británica",
+      irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad irlandesa",
+      northern_irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad norirlandesa"
+    )
+  )
+
+map_wards_2021 <- wards2021 %>%
+  left_join(
+    identity_2021_wards,
+    by = c("WardCode" = "ward_code")
+  )
+```
+
+```{r}
+# -----------------------------
+# 2. MAPA DEA2014 2021
+# -----------------------------
+
+dz_mapa <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/geography-dz2021-geojson/DZ2021.geojson",
+  quiet = TRUE
+)
+
+dea_mapa <- dz_mapa %>%
+  group_by(DEA2014_cd, DEA2014_nm) %>%
+  summarise(
+    geometry = st_union(geometry),
+    .groups = "drop"
+  )
+
+identity_2021_dea <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2021_national identity.xlsx",
+  sheet = "Table",
+  skip = 4
+) %>%
+  mutate(
+    across(
+      -c(
+        `District Electoral Area 2014 Code`,
+        `District Electoral Area 2014 Label`
+      ),
+      as.numeric
+    )
+  ) %>%
+  transmute(
+    dea_code = `District Electoral Area 2014 Code`,
+    dea_name = `District Electoral Area 2014 Label`,
+
+    british =
+      `British only` +
+      `British and Irish only` +
+      `British and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    irish =
+      `Irish only` +
+      `British and Irish only` +
+      `Irish and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    northern_irish =
+      `Northern Irish only` +
+      `British and Northern Irish only` +
+      `Irish and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    identidad = case_when(
+      british == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad británica",
+      irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad irlandesa",
+      northern_irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad norirlandesa"
+    )
+  )
+
+map_dea_2021 <- dea_mapa %>%
+  left_join(
+    identity_2021_dea,
+    by = c("DEA2014_cd" = "dea_code")
+  )
+```
+
+```{r}
+# -----------------------------
+# 3. COMPROBAR UNIONES
+# -----------------------------
+
+map_wards_2021 %>%
+  st_drop_geometry() %>%
+  summarise(
+    total = n(),
+    con_datos = sum(!is.na(identidad)),
+    sin_datos = sum(is.na(identidad))
+  )
+
+map_dea_2021 %>%
+  st_drop_geometry() %>%
+  summarise(
+    total = n(),
+    con_datos = sum(!is.na(identidad)),
+    sin_datos = sum(is.na(identidad))
+  )
+```
+
+```{r}
+# Crear categoría con escala tipo Wikipedia
+crear_escala_identidad <- function(data) {
+  data %>%
+    mutate(
+      total_id = british + irish + northern_irish,
+      british_pct = british / total_id * 100,
+      irish_pct = irish / total_id * 100,
+      
+      identidad_escala = case_when(
+        irish_pct >= 80 ~ "80-100% irlandesa",
+        irish_pct >= 60 ~ "60-80% irlandesa",
+        irish_pct >= 40 ~ "40-60% irlandesa",
+        
+        british_pct < 40 & irish_pct < 40 ~ "Ambas bajo 40%",
+        
+        british_pct >= 80 ~ "80-100% británica",
+        british_pct >= 60 ~ "60-80% británica",
+        british_pct >= 40 ~ "40-60% británica",
+        
+        TRUE ~ "Ambas bajo 40%"
+      )
+    )
+}
+
+map_wards_2021 <- crear_escala_identidad(map_wards_2021)
+map_dea_2021 <- crear_escala_identidad(map_dea_2021)
+```
+
+
+```{r}
+# -----------------------------
+# 4. FUNCIÓN DE MAPA
+# -----------------------------
+
+hacer_mapa_identidad_escala <- function(data, mostrar_leyenda = TRUE) {
+  
+  ggplot() +
+    geom_sf(
+      data = data,
+      aes(fill = identidad_escala),
+      color = "grey35",
+      linewidth = 0.12
+    ) +
+    geom_sf(
+      data = st_union(data),
+      fill = NA,
+      color = "grey20",
+      linewidth = 0.4
+    ) +
+    scale_fill_manual(
+      values = c(
+        "80-100% irlandesa" = "#006400",
+        "60-80% irlandesa"  = "#228B22",
+        "40-60% irlandesa"  = "#90EE90",
+      
+        "Ambas bajo 40%"    = "#F5F5F5",
+      
+        "40-60% británica"  = "#FB6A4A",
+        "60-80% británica"  = "#DE2D26",
+        "80-100% británica" = "#A50F15"
+      ),
+      breaks = c(
+        "80-100% irlandesa",
+        "60-80% irlandesa",
+        "40-60% irlandesa",
+        "Ambas bajo 40%",
+        "40-60% británica",
+        "60-80% británica",
+        "80-100% británica"
+      ),
+      name = NULL,
+      na.value = "#F7F7F7"
+    ) +
+    coord_sf(datum = NA) +
+    theme_void() +
+    theme(
+      legend.position = if (mostrar_leyenda) c(0.05, 0.95) else "none",
+      legend.justification = c(0, 1),
+      legend.background = element_rect(fill = "white", colour = NA),
+      legend.text = element_text(size = 6),
+      legend.key.size = unit(0.25, "cm"),
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+```
+
+```{r}
+# -----------------------------
+# 5. CREAR MAPAS Y JUNTARLOS
+# -----------------------------
+
+p_wards <- hacer_mapa_identidad_escala(
+  map_wards_2021,
+  mostrar_leyenda = TRUE
+)
+
+p_dea <- hacer_mapa_identidad_escala(
+  map_dea_2021,
+  mostrar_leyenda = FALSE
+)
+
+grid.arrange(
+  p_wards,
+  p_dea,
+  ncol = 2,
+  top = "Identidad nacional"
+)
+```
+
+```{r}
+# -----------------------------
+# 6. GUARDAR
+# -----------------------------
+
+png(
+  "identidad_2021_wards_vs_dea.png",
+  width = 3000,
+  height = 1500,
+  res = 300
+)
+
+grid.arrange(
+  p_wards,
+  p_dea,
+  ncol = 2,
+  top = "Identidad nacional en Irlanda del Norte, 2021: wards vs DEA2014"
+)
+
+dev.off()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```

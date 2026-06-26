@@ -1,0 +1,242 @@
+---
+title: "Reunificacion Irlanda"
+author: "Gonzalo Salomoni"
+date: "2026-06-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+# Cargar mapa de District Electoral Areas 2014
+dea_mapa <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/geography-dz2021-geojson/DZ2021.geojson"
+)
+
+
+```
+
+```{r}
+# Crear mapa agregado por DEA2014
+dea_2014 <- dea_mapa %>%
+  group_by(DEA2014_cd, DEA2014_nm) %>%
+  summarise(
+    geometry = st_union(geometry),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    dea_label = str_to_title(DEA2014_nm)
+  )
+```
+
+```{r}
+# Cargar Excel único
+religion_total <- read_excel(
+  "C:/Users/gonza/Documents/Modifis_Irlanda del Norte/Religion_TOTAL.xlsx",
+  skip = 4
+)
+
+names(religion_total)
+```
+
+```{r}
+# Renombrar columnas
+religion_total <- religion_total %>%
+  rename(
+    dea_code = `District Electoral Area 2014 Code`,
+    dea_label = `District Electoral Area 2014 Label`,
+    catholic_2001 = Catholic...3,
+    protestant_2001 = Protestant...4,
+    other_2001 = Other...5,
+    catholic_2011 = Catholic...6,
+    protestant_2011 = Protestant...7,
+    other_2011 = Other...8,
+    catholic_2021 = Catholic...9,
+    protestant_2021 = Protestant...10,
+    other_2021 = Other...11
+  ) %>%
+  mutate(
+    dea_label = str_to_title(dea_label)
+  )
+```
+
+```{r}
+# Pasar a formato largo
+religion_long <- religion_total %>%
+  pivot_longer(
+    cols = catholic_2001:other_2021,
+    names_to = c("religion", "year"),
+    names_sep = "_",
+    values_to = "value"
+  ) %>%
+  pivot_wider(
+    names_from = religion,
+    values_from = value
+  ) %>%
+  mutate(
+    catholic = as.numeric(catholic),
+    protestant = as.numeric(protestant),
+    other = as.numeric(other),
+    
+    classification = case_when(
+      catholic > 0.5 ~ "Mayoría católica",
+      protestant > 0.5 ~ "Mayoría protestante",
+      catholic > protestant ~ "Pluralidad católica",
+      protestant > catholic ~ "Pluralidad protestante",
+      TRUE ~ "Tie"
+    )
+  )
+```
+
+```{r}
+# Crear mapas por año
+map_2001 <- dea_2014 %>%
+  left_join(
+    religion_long %>% filter(year == "2001"),
+    by = "dea_label"
+  )
+
+map_2011 <- dea_2014 %>%
+  left_join(
+    religion_long %>% filter(year == "2011"),
+    by = "dea_label"
+  )
+
+map_2021 <- dea_2014 %>%
+  left_join(
+    religion_long %>% filter(year == "2021"),
+    by = "dea_label"
+  )
+```
+
+```{r}
+# Comprobar si hay zonas sin unir
+map_2021 %>%
+  filter(is.na(classification)) %>%
+  select(DEA2014_nm, dea_label)
+```
+
+```{r}
+hacer_mapa <- function(data, titulo) {
+
+  ggplot(data) +
+    geom_sf(
+      aes(fill = classification),
+      color = "white",
+      linewidth = 0.01
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Mayoría protestante" = "#D62828",
+        "Pluralidad protestante" = "#F4A261",
+        "Mayoría católica" = "#08519C",
+        "Pluralidad católica" = "#9ECAE1"
+      ),
+      breaks = c(
+        "Mayoría protestante",
+        "Pluralidad protestante",
+        "Mayoría católica",
+        "Pluralidad católica"
+      )
+    ) +
+    labs(
+      title = titulo,
+      fill = NULL
+    ) +
+    theme_void() +
+    theme(
+      plot.title = element_text(
+        hjust = 0.5,
+        face = "bold",
+        size = 13
+      ),
+
+      legend.position = "right",
+
+      legend.direction = "vertical",
+
+      legend.text = element_text(size = 7),
+
+      legend.key.height = unit(0.35, "cm"),
+      legend.key.width = unit(0.35, "cm")
+    )
+}
+```
+
+```{r}
+# Crear mapas
+p2001 <- hacer_mapa(map_2001, "2001") +
+  theme(
+    legend.position = c(0.05, 0.95),
+    legend.justification = c(0, 1),
+
+    legend.background = element_rect(
+      fill = "white",
+      colour = NA
+    ),
+
+    legend.text = element_text(size = 5),
+
+    legend.key.height = unit(0.18, "cm"),
+    legend.key.width = unit(0.18, "cm")
+  )
+
+p2011 <- hacer_mapa(map_2011, "2011") +
+  theme(legend.position = "none")
+
+p2021 <- hacer_mapa(map_2021, "2021") +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Mostrar los tres mapas juntos
+grid.arrange(
+  p2001,
+  p2011,
+  p2021,
+  ncol = 3,
+  top = "Cambios en religión entre 2001 y 2021"
+)
+```
+
+```{r}
+# Contar categorías por año
+religion_long %>%
+  count(year, classification)
+```
+
+```{r}
+png(
+  "religion_northern_ireland.png",
+  width = 3000,
+  height = 1200,
+  res = 300
+)
+
+grid.arrange(
+  p2001,
+  p2011,
+  p2021,
+  ncol = 3,
+  top = "Cambios en origenes religiosos entre 2001 y 2021"
+)
+
+dev.off()
+```
+

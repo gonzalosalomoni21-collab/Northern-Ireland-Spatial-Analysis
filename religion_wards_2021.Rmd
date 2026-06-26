@@ -1,0 +1,184 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+# 1. Cargar mapa de wards
+wards_mapa <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/osni_open_data_largescale_boundaries_wards_2012.geojson",
+  quiet = TRUE
+)
+```
+
+```{r}
+# 2. Cargar datos de religión 2021 por wards
+wards_2021 <- read_excel(
+  "C:/Users/gonza/Documents/Modifis_Irlanda del Norte/Wards2021.xlsx",
+  skip = 8
+) %>%
+  rename(
+    ward = Geography,
+    code = `Geography code`,
+    total = `All usual residents`,
+    catholic = `Catholic`,
+    presbyterian = `Presbyterian Church in Ireland`,
+    church_ireland = `Church of Ireland`,
+    methodist = `Methodist Church in Ireland`,
+    other_christian = `Other Christian (including Christian related)`,
+    other_religions = `Other religions`,
+    no_religion = `No religion`,
+    religion_not_stated = `Religion not stated`
+  ) %>%
+  mutate(
+    catholic_pct = catholic * 100,
+    protestant_pct = (
+      presbyterian +
+        church_ireland +
+        methodist +
+        other_christian
+    ) * 100,
+    no_religion_pct = no_religion * 100
+  )
+```
+
+```{r}
+# 3. Unir mapa + datos
+wards_geo <- wards_mapa %>%
+  left_join(
+    wards_2021,
+    by = c("WardCode" = "code")
+  )
+```
+
+```{r}
+# 4. Comprobar unión
+wards_geo %>%
+  summarise(
+    total_wards = n(),
+    con_datos = sum(!is.na(catholic_pct)),
+    sin_datos = sum(is.na(catholic_pct))
+  )
+```
+
+```{r}
+# 5. Función para crear mapas
+hacer_mapa_pct <- function(data, variable, titulo, paleta) {
+
+  ggplot() +
+
+    geom_sf(
+      data = data,
+      aes(fill = .data[[variable]]),
+      color = NA
+    ) +
+
+    geom_sf(
+      data = st_union(data),
+      fill = NA,
+      color = "grey40",
+      linewidth = 0.4
+    ) +
+
+    scale_fill_stepsn(
+      colours = RColorBrewer::brewer.pal(9, paleta),
+      n.breaks = 10
+    ) +
+
+    labs(title = titulo) +
+
+    theme_void() +
+
+    theme(
+      plot.title = element_text(
+        hjust = 0.5,
+        face = "bold",
+        size = 12
+      ),
+
+      legend.position = c(0.08, 0.72),
+
+      legend.text = element_text(size = 5),
+      legend.title = element_text(size = 6),
+
+      legend.key.height = unit(0.18, "cm"),
+      legend.key.width = unit(0.18, "cm")
+    )
+}
+```
+
+```{r}
+# 6. Crear mapas
+map_catholic <- hacer_mapa_pct(
+  wards_geo,
+  "catholic_pct",
+  "Católico",
+  "Reds"
+)
+
+map_protestant <- hacer_mapa_pct(
+  wards_geo,
+  "protestant_pct",
+  "Protestante",
+  "Blues"
+)
+
+map_no_religion <- hacer_mapa_pct(
+  wards_geo,
+  "no_religion_pct",
+  "Sin religión",
+  "Purples"
+)
+```
+
+```{r}
+# 7. Mostrar mapas juntos
+grid.arrange(
+  map_catholic,
+  map_protestant,
+  map_no_religion,
+  ncol = 3,
+  top = "Religión en Irlanda del Norte, 2021"
+)
+```
+
+```{r}
+png(
+  "religion_wards_2021.png",
+  width = 3000,
+  height = 1200,
+  res = 300
+)
+
+grid.arrange(
+  map_catholic,
+  map_protestant,
+  map_no_religion,
+  ncol = 3,
+  top = "Religious Background in Northern Ireland, 2021"
+)
+
+dev.off()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+-
+```

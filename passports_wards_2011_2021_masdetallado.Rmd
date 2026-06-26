@@ -1,0 +1,189 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+dz_mapa <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/geography-dz2021-geojson/DZ2021.geojson",
+  quiet = TRUE
+)
+
+dea_mapa <- dz_mapa %>%
+  group_by(DEA2014_cd, DEA2014_nm) %>%
+  summarise(
+    geometry = st_union(geometry),
+    .groups = "drop"
+  )
+```
+
+```{r}
+pass_2011_dea <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2011_passports held.xlsx",
+  sheet = "DEA2014",
+  skip = 5
+) %>%
+  transmute(
+    dea_code = `DEA2014`,
+    british = `Passports held: United Kingdom`,
+    irish = `Passports held: Ireland`,
+    year = "2011",
+    passport_majority = case_when(
+      british > irish ~ "Más pasaportes británicos",
+      irish > british ~ "Más pasaportes irlandeses",
+      TRUE ~ "Empate"
+    )
+  )
+```
+
+```{r}
+# 2021 por DEA2014
+pass_2021_dea <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2021_passports held.xlsx",
+  sheet = "Table",
+  skip = 4
+) %>%
+  mutate(
+    across(
+      -c(
+        `District Electoral Area 2014 Code`,
+        `District Electoral Area 2014 Label`
+      ),
+      as.numeric
+    )
+  ) %>%
+  transmute(
+    dea_code = `District Electoral Area 2014 Code`,
+    dea_name = `District Electoral Area 2014 Label`,
+
+    british =
+      `United Kingdom only` +
+      `United Kingdom and Ireland only` +
+      `United Kingdom and other (not Ireland)` +
+      `United Kingdom, Ireland and other`,
+
+    irish =
+      `Ireland only` +
+      `United Kingdom and Ireland only` +
+      `Ireland and other (not United Kingdom)` +
+      `United Kingdom, Ireland and other`,
+
+    year = "2021",
+
+    passport_majority = case_when(
+      british > irish ~ "Más pasaportes británicos",
+      irish > british ~ "Más pasaportes irlandeses",
+      TRUE ~ "Empate"
+    )
+  )
+```
+
+```{r}
+map_2011 <- dea_mapa %>%
+  mutate(
+    dea_join = str_to_upper(str_trim(DEA2014_nm))
+  ) %>%
+  left_join(
+    pass_2011_dea %>%
+      mutate(
+        dea_join = str_to_upper(str_trim(dea_code))
+      ),
+    by = "dea_join"
+  )
+
+map_2021 <- dea_mapa %>%
+  left_join(
+    pass_2021_dea,
+    by = c("DEA2014_cd" = "dea_code")
+  )
+```
+
+```{r}
+hacer_mapa_pasaporte <- function(data, mostrar_leyenda = TRUE){
+
+  ggplot() +
+    geom_sf(
+      data = data,
+      aes(fill = passport_majority),
+      color = "grey30",
+      linewidth = 0.15
+    ) +
+    geom_sf(
+      data = st_union(data),
+      fill = NA,
+      color = "grey20",
+      linewidth = 0.35
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Más pasaportes británicos" = "#D7191C",
+        "Más pasaportes irlandeses" = "#1A9641"
+      ),
+      name = NULL
+    ) +
+    coord_sf(datum = NA) +
+    theme_void() +
+    theme(
+      legend.position = if(mostrar_leyenda) c(0.05,0.95) else "none",
+      legend.justification = c(0,1)
+    )
+}
+```
+
+
+```{r}
+p2011 <- hacer_mapa_pasaporte(map_2011, TRUE)
+p2021 <- hacer_mapa_pasaporte(map_2021, FALSE)
+
+grid.arrange(
+  p2011,
+  p2021,
+  ncol = 2,
+  top = "Poseción de pasaportes"
+)
+```
+
+
+```{r}
+png(
+  "passports_wards_2011_2021_masdetallado.png",
+  width = 3000,
+  height = 1500,
+  res = 300
+)
+
+grid.arrange(
+  p2011,
+  p2021,
+  ncol = 2,
+  top = "Poseción de pasaportes"
+)
+
+dev.off()
+```
+
+```{r}
+head(pass_2011_dea)
+```
+
+```{r}
+pass_2011_dea %>%
+  summarise(
+    deas_irlandeses = sum(irish > british)
+  )
+```
+
+```{r}
+
+```
+

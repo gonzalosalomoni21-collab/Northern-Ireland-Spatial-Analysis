@@ -1,0 +1,258 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+# MAPAS DE WARDS
+
+wards_2011 <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/osni_open_data_largescale_boundaries_wards_1993.geojson",
+  quiet = TRUE
+)
+
+wards_2021 <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/osni_open_data_largescale_boundaries_wards_2012.geojson",
+  quiet = TRUE
+)
+```
+
+```{r}
+# DATOS PASAPORTES 2011 POR WARD
+
+pass_2011 <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2011_passports held.xlsx",
+  sheet = "Ward",
+  skip = 5
+) %>%
+  rename(
+    ward = 1,
+    british = `Passports held: United Kingdom`,
+    irish = `Passports held: Ireland`
+  ) %>%
+  transmute(
+    ward,
+    british = as.numeric(british),
+    irish = as.numeric(irish),
+    year = "2011",
+    passport_majority = case_when(
+      british > irish ~ "Más pasaportes británicos",
+      irish > british ~ "Más pasaportes irlandeses",
+      TRUE ~ "Empate"
+    )
+  )
+```
+
+```{r}
+# DATOS PASAPORTES 2021 POR WARD
+
+pass_2021 <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/census-2021-ms-a20.xlsx",
+  sheet = "Ward",
+  skip = 8
+) %>%
+  mutate(
+    across(
+      -c(Geography, `Geography code`),
+      as.numeric
+    )
+  ) %>%
+  transmute(
+    ward = Geography,
+    ward_code = `Geography code`,
+
+    british =
+      `United Kingdom only` +
+      `United Kingdom and Ireland only` +
+      `United Kingdom and other (not Ireland)` +
+      `United Kingdom, Ireland and other`,
+
+    irish =
+      `Ireland only` +
+      `United Kingdom and Ireland only` +
+      `Ireland and other (not United Kingdom)` +
+      `United Kingdom, Ireland and other`,
+
+    year = "2021",
+    passport_majority = case_when(
+      british > irish ~ "Más pasaportes británicos",
+      irish > british ~ "Más pasaportes irlandeses",
+      TRUE ~ "Empate"
+    )
+  ) %>%
+  distinct(ward_code, .keep_all = TRUE)
+```
+
+```{r}
+# UNIR MAPA + DATOS
+
+map_2011 <- wards_2011 %>%
+  mutate(
+    ward_join = str_to_upper(str_trim(NAME))
+  ) %>%
+  left_join(
+    pass_2011 %>%
+      mutate(
+        ward_join = str_to_upper(str_trim(ward))
+      ),
+    by = "ward_join"
+  )
+
+map_2021 <- wards_2021 %>%
+  left_join(
+    pass_2021,
+    by = c("WardCode" = "ward_code")
+  )
+```
+
+```{r}
+# COMPROBAR UNIONES
+
+map_2011 %>%
+  st_drop_geometry() %>%
+  summarise(
+    total_wards = n(),
+    con_datos = sum(!is.na(passport_majority)),
+    sin_datos = sum(is.na(passport_majority))
+  )
+
+map_2021 %>%
+  st_drop_geometry() %>%
+  summarise(
+    total_wards = n(),
+    con_datos = sum(!is.na(passport_majority)),
+    sin_datos = sum(is.na(passport_majority))
+  )
+```
+
+```{r}
+# FUNCIÓN MAPA
+
+hacer_mapa_pasaporte <- function(data, mostrar_leyenda = TRUE) {
+
+  ggplot() +
+    geom_sf(
+      data = data,
+      aes(fill = passport_majority),
+      color = "grey35",
+      linewidth = 0.08
+    ) +
+    geom_sf(
+      data = data,
+      aes(fill = passport_majority),
+      color = NA
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Más pasaportes británicos" = "#D7191C",
+        "Más pasaportes irlandeses" = "#1A9641",
+        "Empate" = "grey80"
+      ),
+      breaks = c(
+        "Más pasaportes británicos",
+        "Más pasaportes irlandeses"
+      ),
+      na.value = "grey90",
+      name = NULL
+    ) +
+    coord_sf(datum = NA) +
+    theme_void() +
+    theme(
+      legend.position = if (mostrar_leyenda) c(0.05, 0.95) else "none",
+      legend.justification = c(0, 1),
+      legend.background = element_rect(fill = "white", colour = NA),
+      legend.text = element_text(size = 6),
+      legend.key.size = unit(0.25, "cm"),
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+```
+
+```{r}
+# CREAR MAPAS
+
+p2011 <- hacer_mapa_pasaporte(map_2011, TRUE)
+p2021 <- hacer_mapa_pasaporte(map_2021, FALSE)
+
+grid.arrange(
+  p2011,
+  p2021,
+  ncol = 2,
+  top = "Posesión de pasaportes por wards: 2011 y 2021"
+)
+```
+
+```{r}
+# GUARDAR
+
+png(
+  "passports_wards_2011_2021.png",
+  width = 3000,
+  height = 1500,
+  res = 300
+)
+
+grid.arrange(
+  p2011,
+  p2021,
+  ncol = 2,
+  top = "Posesión de pasaportes por wards: 2011 y 2021"
+)
+
+dev.off()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+

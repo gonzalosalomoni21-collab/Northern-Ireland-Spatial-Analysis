@@ -1,0 +1,231 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+# -----------------------------
+# 1. MAPA WARDS 2011
+# -----------------------------
+
+wards1993 <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/osni_open_data_largescale_boundaries_wards_1993.geojson",
+  quiet = TRUE
+)
+
+identity_2011_wards <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2011_national identity.xlsx",
+  sheet = "Ward",
+  skip = 5,
+  col_names = FALSE
+) %>%
+  transmute(
+    ward = .[[1]],
+    ward_code = .[[2]],
+
+    british = as.numeric(.[[4]]),
+    irish = as.numeric(.[[5]]),
+    northern_irish = as.numeric(.[[6]]),
+
+    identity_majority = case_when(
+      british == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad británica",
+      irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad irlandesa",
+      northern_irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad norirlandesa"
+    )
+  )
+
+map_2011 <- wards1993 %>%
+  mutate(
+    ward_join = str_to_upper(str_trim(NAME))
+  ) %>%
+  left_join(
+    identity_2011_wards %>%
+      mutate(
+        ward_join = str_to_upper(str_trim(ward))
+      ),
+    by = "ward_join"
+  ) %>%
+  mutate(
+    identity_majority = if_else(
+      is.na(identity_majority),
+      "Identidad británica",
+      identity_majority
+    )
+  )
+```
+
+```{r}
+# -----------------------------
+# 2. MAPA WARDS 2021
+# -----------------------------
+
+wards2021 <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/osni_open_data_largescale_boundaries_wards_2012.geojson",
+  quiet = TRUE
+)
+
+identity_2021_wards <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/census-2021_identidad.xlsx",
+  sheet = "Ward",
+  skip = 7
+) %>%
+  mutate(
+    across(
+      -c(Geography, `Geography code`),
+      as.numeric
+    )
+  ) %>%
+  transmute(
+    ward = Geography,
+    ward_code = `Geography code`,
+
+    british =
+      `British only` +
+      `British and Irish only` +
+      `British and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    irish =
+      `Irish only` +
+      `British and Irish only` +
+      `Irish and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    northern_irish =
+      `Northern Irish only` +
+      `British and Northern Irish only` +
+      `Irish and Northern Irish only` +
+      `British, Irish and Northern Irish only`,
+
+    identity_majority = case_when(
+      british == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad británica",
+      irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad irlandesa",
+      northern_irish == pmax(british, irish, northern_irish, na.rm = TRUE) ~ "Identidad norirlandesa"
+    )
+  )
+
+map_2021 <- wards2021 %>%
+  left_join(
+    identity_2021_wards,
+    by = c("WardCode" = "ward_code")
+  )
+```
+
+```{r}
+# -----------------------------
+# 3. FUNCIÓN DE MAPA
+# -----------------------------
+
+hacer_mapa_identidad <- function(data, mostrar_leyenda = TRUE) {
+
+  ggplot() +
+    geom_sf(
+      data = data,
+      aes(fill = identity_majority),
+      color = NA
+    ) +
+    geom_sf(
+      data = st_union(data),
+      fill = NA,
+      color = "grey25",
+      linewidth = 0.35
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Identidad británica" = "#E31A1C",
+        "Identidad irlandesa" = "#1A9850",
+        "Identidad norirlandesa" = "#6A3D9A"
+      ),
+      breaks = c(
+        "Identidad británica",
+        "Identidad irlandesa",
+        "Identidad norirlandesa"
+      ),
+      na.value = "#E31A1C",
+      name = NULL
+    ) +
+    coord_sf(datum = NA) +
+    theme_void() +
+    theme(
+      legend.position = if (mostrar_leyenda) c(0.05, 0.95) else "none",
+      legend.justification = c(0, 1),
+      legend.background = element_rect(fill = "white", colour = NA),
+      legend.text = element_text(size = 6),
+      legend.key.size = unit(0.25, "cm"),
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+```
+
+```{r}
+# -----------------------------
+# 4. CREAR Y JUNTAR MAPAS
+# -----------------------------
+
+p2011 <- hacer_mapa_identidad(map_2011, mostrar_leyenda = TRUE)
+
+p2021 <- hacer_mapa_identidad(map_2021, mostrar_leyenda = FALSE)
+
+grid.arrange(
+  p2011,
+  p2021,
+  ncol = 2,
+  top = "Identidad nacional por wards: 2011 y 2021"
+)
+```
+
+```{r}
+# -----------------------------
+# 5. GUARDAR
+# -----------------------------
+
+png(
+  "identidad_nacional_wards_2011_2021.png",
+  width = 3000,
+  height = 1500,
+  res = 300
+)
+
+grid.arrange(
+  p2011,
+  p2021,
+  ncol = 2,
+  top = "Identidad nacional por wards: 2011 y 2021"
+)
+
+dev.off()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```

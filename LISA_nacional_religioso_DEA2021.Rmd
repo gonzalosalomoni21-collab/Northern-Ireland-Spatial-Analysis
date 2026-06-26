@@ -1,0 +1,242 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(spdep)
+library(ggplot2)
+```
+
+```{r}
+# 1. Cargar mapa DEA2014
+dz_mapa <- st_read(
+  "Irlanda del Norte/geography-dz2021-geojson/DZ2021.geojson",
+  quiet = TRUE
+)
+
+dea_mapa <- dz_mapa %>%
+  group_by(DEA2014_cd, DEA2014_nm) %>%
+  summarise(
+    geometry = st_union(geometry),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# 2. Leer Excel con encabezados múltiples
+# 2. Leer Excel de identidad nacional x religión
+
+raw <- read_excel("Irlanda del Norte/ni-census21-people-dea14-nat_id_basic+religion_belong_to_or_brought_up_in_dvo-f481e0f4.xlsx",
+  sheet = "Table",
+  skip = 4,
+  col_names = FALSE
+)
+
+headers <- raw[1:2, ]
+datos_raw <- raw[-c(1:2), ]
+
+# La 4ª categoría religiosa aparece como NA, pero corresponde a "None"
+religion_headers <- as.character(headers[2, 3:ncol(headers)])
+religion_headers[is.na(religion_headers)] <- "None"
+
+nombres <- c(
+  "dea_code",
+  "dea_name",
+  paste(
+    as.character(headers[1, 3:ncol(headers)]),
+    religion_headers,
+    sep = "__"
+  )
+)
+
+names(datos_raw) <- nombres
+```
+
+```{r}
+# 3. Crear variables clave
+
+# 3. Crear variables clave: religión + identidad
+
+datos_dea <- datos_raw %>%
+  transmute(
+    dea_code,
+    dea_name,
+
+    # Identidad irlandesa total
+    identidad_irlandesa =
+      as.numeric(`Irish only__Catholic`) +
+      as.numeric(`Irish only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`Irish only__Other religions`) +
+      as.numeric(`Irish only__None`),
+
+    # Identidad británica total
+    identidad_britanica =
+      as.numeric(`British only__Catholic`) +
+      as.numeric(`British only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`British only__Other religions`) +
+      as.numeric(`British only__None`),
+
+    # Católicos totales: sumar todas las identidades nacionales dentro de Catholic
+    catolicos =
+      as.numeric(`British only__Catholic`) +
+      as.numeric(`Irish only__Catholic`) +
+      as.numeric(`Northern Irish only__Catholic`) +
+      as.numeric(`British and Irish only__Catholic`) +
+      as.numeric(`British and Northern Irish only__Catholic`) +
+      as.numeric(`Irish and Northern Irish only__Catholic`) +
+      as.numeric(`British, Irish and Northern Irish only__Catholic`) +
+      as.numeric(`Other__Catholic`),
+
+    # Protestantes totales
+    protestantes =
+      as.numeric(`British only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`Irish only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`Northern Irish only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`British and Irish only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`British and Northern Irish only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`Irish and Northern Irish only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`British, Irish and Northern Irish only__Protestant and Other Christian (including Christian related)`) +
+      as.numeric(`Other__Protestant and Other Christian (including Christian related)`)
+  ) %>%
+  mutate(
+    total = catolicos + protestantes,
+
+    pct_catolicos = 100 * catolicos / total,
+    pct_protestantes = 100 * protestantes / total,
+    pct_identidad_irlandesa = 100 * identidad_irlandesa / total,
+    pct_identidad_britanica = 100 * identidad_britanica / total,
+
+    indice_nacional =
+      scale(pct_catolicos)[,1] +
+      scale(pct_identidad_irlandesa)[,1] -
+      scale(pct_protestantes)[,1] -
+      scale(pct_identidad_britanica)[,1]
+  )
+```
+
+```{r}
+# 4. Unir datos al mapa
+
+dea_sf <- dea_mapa %>%
+  left_join(
+    datos_dea,
+    by = c("DEA2014_cd" = "dea_code")
+  )
+
+dea_sf %>%
+  st_drop_geometry() %>%
+  summarise(
+    total = n(),
+    con_datos = sum(!is.na(indice_nacional)),
+    sin_datos = sum(is.na(indice_nacional))
+  )
+```
+
+```{r}
+# 5. Moran global
+
+vecinos <- poly2nb(dea_sf, queen = TRUE)
+
+pesos <- nb2listw(
+  vecinos,
+  style = "W",
+  zero.policy = TRUE
+)
+
+moran_global <- moran.test(
+  dea_sf$indice_nacional,
+  pesos,
+  zero.policy = TRUE
+)
+
+moran_global
+```
+
+```{r}
+# 6. Moran local
+
+local_moran <- localmoran(
+  dea_sf$indice_nacional,
+  pesos,
+  zero.policy = TRUE
+)
+
+dea_sf$Ii <- local_moran[, "Ii"]
+dea_sf$p_value <- local_moran[, "Pr(z != E(Ii))"]
+
+dea_sf$indice_z <- as.numeric(scale(dea_sf$indice_nacional))
+
+dea_sf$lag_indice <- lag.listw(
+  pesos,
+  dea_sf$indice_z,
+  zero.policy = TRUE
+)
+```
+
+```{r}
+# 7. Clasificación LISA
+alpha <- 0.05
+
+dea_sf <- dea_sf %>%
+  mutate(
+    lisa_cluster = case_when(
+      p_value >= alpha ~ "No significativo",
+      indice_z > 0 & lag_indice > 0 ~ "Alto-Alto irlandés-católico",
+      indice_z < 0 & lag_indice < 0 ~ "Alto-Alto británico-protestante",
+      indice_z > 0 & lag_indice < 0 ~ "Alto-Bajo",
+      indice_z < 0 & lag_indice > 0 ~ "Bajo-Alto",
+      TRUE ~ "No significativo"
+    )
+  )
+
+table(dea_sf$lisa_cluster)
+```
+
+```{r}
+# 8. Mapa LISA
+
+mapa_lisa <- ggplot() +
+  geom_sf(
+    data = dea_sf,
+    aes(fill = lisa_cluster),
+    color = "grey35",
+    linewidth = 0.15
+  ) +
+  geom_sf(
+    data = st_union(dea_sf),
+    fill = NA,
+    color = "grey20",
+    linewidth = 0.4
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Alto-Alto irlandés-católico" = "#1A9850",
+      "Alto-Alto británico-protestante" = "#D7191C",
+      "Alto-Bajo" = "#A6D96A",
+      "Bajo-Alto" = "#FDAE61",
+      "No significativo" = "grey85"
+    ),
+    name = NULL
+  ) +
+  labs(
+    title = "Mapa LISA del eje nacional-religioso, 2021"
+  ) +
+  coord_sf(datum = NA) +
+  theme_void()
+
+ggsave(
+  filename = "LISA_nacional_religioso_DEA2021.png",
+  plot = mapa_lisa,
+  width = 10,
+  height = 8,
+  dpi = 300,
+  bg = "white"
+)
+```
+

@@ -1,0 +1,358 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-05"
+output: html_document
+---
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+# Función para leer Excel con encabezado múltiple de 2 filas
+leer_censo_2headers <- function(path) {
+  
+  raw <- read_excel(
+    path,
+    sheet = "Table",
+    skip = 4,
+    col_names = FALSE
+  )
+  
+  headers <- raw[1:2, ]
+  datos <- raw[-c(1:2), ]
+  
+  nombres <- c(
+    "dea_code",
+    "dea_name",
+    paste(
+      as.character(headers[1, 3:ncol(headers)]),
+      as.character(headers[2, 3:ncol(headers)]),
+      sep = "__"
+    )
+  )
+  
+  names(datos) <- nombres
+  
+  datos %>%
+    mutate(
+      across(
+        -c(dea_code, dea_name),
+        as.numeric
+      )
+    )
+}
+```
+
+```{r}
+# Leer los dos Excel
+religion_id <- leer_censo_2headers(
+  "Irlanda del Norte/ni-census21-people-dea14-nat_id_basic+religion_belong_to_or_brought_up_in_dvo-f481e0f4.xlsx"
+)
+
+passports_id <- leer_censo_2headers(
+  "Irlanda del Norte/ni-census21-people-dea14-nat_id_basic+passports_held_basic-3a363c93.xlsx"
+)
+```
+
+```{r}
+# Crear variables de religión e identidad
+religion_dea <- religion_id %>%
+  transmute(
+    dea_code,
+    dea_name,
+    
+    total_religion = rowSums(
+      across(-c(dea_code, dea_name)),
+      na.rm = TRUE
+    ),
+    
+    catolicos = rowSums(
+      across(contains("__Catholic")),
+      na.rm = TRUE
+    ),
+    
+    protestantes = rowSums(
+      across(contains("__Protestant and Other Christian")),
+      na.rm = TRUE
+    ),
+    
+    identidad_irlandesa = rowSums(
+      across(starts_with("Irish only__")),
+      na.rm = TRUE
+    ),
+    
+    identidad_britanica = rowSums(
+      across(starts_with("British only__")),
+      na.rm = TRUE
+    )
+  )
+```
+
+```{r}
+# Crear variables de pasaportes
+passports_dea <- passports_id %>%
+  transmute(
+    dea_code,
+    dea_name,
+    
+    total_passports = rowSums(
+      across(-c(dea_code, dea_name)),
+      na.rm = TRUE
+    ),
+    
+    pasaporte_irlandes = rowSums(
+      across(
+        matches(
+          "__Ireland only$|__United Kingdom and Ireland only$|__Ireland and other \\(not United Kingdom\\)$|__United Kingdom, Ireland and other$"
+        )
+      ),
+      na.rm = TRUE
+    ),
+    
+    pasaporte_britanico = rowSums(
+      across(
+        matches(
+          "__United Kingdom only$|__United Kingdom and Ireland only$|__United Kingdom and other \\(not Ireland\\)$|__United Kingdom, Ireland and other$"
+        )
+      ),
+      na.rm = TRUE
+    )
+  )
+```
+
+```{r}
+# Unir todo y calcular porcentajes
+dea_relaciones <- religion_dea %>%
+  left_join(
+    passports_dea %>%
+      select(dea_code, total_passports, pasaporte_irlandes, pasaporte_britanico),
+    by = "dea_code"
+  ) %>%
+  mutate(
+    pct_catolicos = 100 * catolicos / total_religion,
+    pct_protestantes = 100 * protestantes / total_religion,
+    pct_identidad_irlandesa = 100 * identidad_irlandesa / total_religion,
+    pct_identidad_britanica = 100 * identidad_britanica / total_religion,
+    pct_pasaporte_irlandes = 100 * pasaporte_irlandes / total_passports,
+    pct_pasaporte_britanico = 100 * pasaporte_britanico / total_passports
+  )
+```
+
+```{r}
+# Función para hacer scatterplot con R2
+hacer_scatter <- function(data, x, y, titulo, xlab, ylab, color_punto) {
+  
+  modelo <- lm(
+    reformulate(x, y),
+    data = data
+  )
+  
+  r2 <- round(summary(modelo)$r.squared, 3)
+  
+  ggplot(data, aes(x = .data[[x]], y = .data[[y]])) +
+    geom_point(
+      color = color_punto,
+      size = 3,
+      alpha = 0.75
+    ) +
+    geom_smooth(
+      method = "lm",
+      se = FALSE,
+      color = "grey25",
+      linewidth = 1
+    ) +
+    annotate(
+      "text",
+      x = Inf,
+      y = -Inf,
+      label = paste0("R² = ", r2),
+      hjust = 1.1,
+      vjust = -1,
+      size = 4
+    ) +
+    labs(
+      title = titulo,
+      x = xlab,
+      y = ylab
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold")
+    )
+}
+```
+
+```{r}
+# Scatterplots
+p1 <- hacer_scatter(
+  dea_relaciones,
+  "pct_catolicos",
+  "pct_identidad_irlandesa",
+  "Católicos e identidad irlandesa",
+  "% católicos",
+  "% identidad irlandesa",
+  "#1A9850"
+)
+
+p2 <- hacer_scatter(
+  dea_relaciones,
+  "pct_protestantes",
+  "pct_identidad_britanica",
+  "Protestantes e identidad británica",
+  "% protestantes",
+  "% identidad británica",
+  "#D7191C"
+)
+
+p3 <- hacer_scatter(
+  dea_relaciones,
+  "pct_identidad_irlandesa",
+  "pct_pasaporte_irlandes",
+  "Identidad irlandesa y pasaporte irlandés",
+  "% identidad irlandesa",
+  "% pasaporte irlandés",
+  "#006D2C"
+)
+
+p4 <- hacer_scatter(
+  dea_relaciones,
+  "pct_identidad_britanica",
+  "pct_pasaporte_britanico",
+  "Identidad británica y pasaporte británico",
+  "% identidad británica",
+  "% pasaporte británico",
+  "#B2182B"
+)
+```
+
+```{r}
+# Juntar los 4 gráficos
+grid.arrange(
+  p1, p2,
+  p3, p4,
+  ncol = 2,
+  top = "Relación entre religión, identidad nacional y pasaportes por DEA2014"
+)
+```
+
+```{r}
+# Guardar
+png(
+  "scatter_religion_identidad_pasaportes_DEA2021.png",
+  width = 3000,
+  height = 2400,
+  res = 300
+)
+
+grid.arrange(
+  p1, p2,
+  p3, p4,
+  ncol = 2,
+  top = "Relación entre religión, identidad nacional y pasaportes por DEA2014"
+)
+
+dev.off()
+```
+
+```{r}
+tabla_r2 <- tibble(
+  relacion = c(
+    "Católicos vs identidad irlandesa",
+    "Protestantes vs identidad británica",
+    "Identidad irlandesa vs pasaporte irlandés",
+    "Identidad británica vs pasaporte británico"
+  ),
+  r2 = c(
+    summary(lm(pct_identidad_irlandesa ~ pct_catolicos, data = dea_relaciones))$r.squared,
+    summary(lm(pct_identidad_britanica ~ pct_protestantes, data = dea_relaciones))$r.squared,
+    summary(lm(pct_pasaporte_irlandes ~ pct_identidad_irlandesa, data = dea_relaciones))$r.squared,
+    summary(lm(pct_pasaporte_britanico ~ pct_identidad_britanica, data = dea_relaciones))$r.squared
+  )
+)
+
+tabla_r2
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+library(gridExtra)
+
+figura_scatter <- grid.arrange(
+  p1, p2,
+  p3, p4,
+  ncol = 2,
+  top = "Relación entre religión, identidad nacional y pasaportes por DEA2014"
+)
+```
+
+```{r}
+png(
+  "scatter_religion_identidad_pasaportes_DEA2021.png",
+  width = 4000,
+  height = 3200,
+  res = 600
+)
+
+grid.draw(figura_scatter)
+
+dev.off()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+

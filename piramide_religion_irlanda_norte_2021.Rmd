@@ -1,0 +1,120 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+```
+
+```{r}
+datos <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2021_religion_population_pyramid.xlsx",
+  sheet = "Table",
+  skip = 3
+)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(readr)
+
+datos <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2021_religion_population_pyramid.xlsx",
+  sheet = "Table",
+  skip = 3
+)
+
+datos_limpios <- datos %>%
+  rename(
+    edad_label = `Age Label`,
+    sexo = `Sex Label`,
+    religion = `Religion or Religion Brought Up In Label`,
+    personas = Count
+  ) %>%
+  mutate(
+    edad = parse_number(edad_label),
+    personas = as.numeric(personas),
+    
+    sexo = case_when(
+      str_to_lower(sexo) == "male" ~ "Male",
+      str_to_lower(sexo) == "female" ~ "Female",
+      TRUE ~ NA_character_
+    ),
+    
+    religion = case_when(
+      str_detect(religion, regex("Catholic", ignore_case = TRUE)) ~ "Católica",
+      str_detect(religion, regex("Protestant", ignore_case = TRUE)) ~ "Protestante",
+      str_detect(religion, regex("Other religions", ignore_case = TRUE)) ~ "Otras religiones",
+      str_detect(religion, regex("None|No religion", ignore_case = TRUE)) ~ "Sin religión",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(
+    !is.na(edad),
+    edad >= 0,
+    edad <= 99,
+    !is.na(sexo),
+    !is.na(religion),
+    !is.na(personas)
+  ) %>%
+  mutate(
+    personas_plot = if_else(sexo == "Male", -personas, personas)
+  )
+```
+
+```{r}
+datos_piramide <- datos_limpios %>%
+  group_by(edad, sexo, religion) %>%
+  summarise(
+    personas = sum(personas),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    personas_plot = if_else(
+      sexo == "Male",
+      -personas,
+      personas
+    )
+  )
+```
+
+```{r}
+ggplot(
+  datos_piramide,
+  aes(
+    x = edad,
+    y = personas_plot,
+    fill = religion
+  )
+) +
+  geom_col(width = 0.9) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = abs
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Católica" = "#D7191C",
+      "Protestante" = "#0077B6",
+      "Otras religiones" = "#F0C400",
+      "Sin religión" = "grey70"
+    )
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggsave(
+  "piramide_religion_irlanda_norte_2021.png",
+  width = 10,
+  height = 7,
+  dpi = 300
+)
+```

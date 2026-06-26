@@ -1,0 +1,225 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+library(gridExtra)
+```
+
+```{r}
+# 1. Cargar DZ2021 y agregar a DEA2014
+dz_mapa <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/geography-dz2021-geojson/DZ2021.geojson",
+  quiet = TRUE
+) %>%
+  st_set_crs(29902)
+
+dea_mapa <- dz_mapa %>%
+  group_by(DEA2014_cd, DEA2014_nm) %>%
+  summarise(
+    geometry = st_union(geometry),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# 2. Cargar religión actual 2021
+religion_actual <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2021_religion.xlsx",
+  sheet = "Table",
+  skip = 4
+) %>%
+  rename(
+    dea_code = `District Electoral Area 2014 Code`,
+    dea_name = `District Electoral Area 2014 Label`,
+    catholic = Catholic,
+    protestant = `Protestant and Other Christian (including Christian related)`,
+    other = `Other religions`,
+    no_religion = `No religion/religion not stated`
+  ) %>%
+  mutate(
+    total = catholic + protestant + other + no_religion,
+    catholic_pct = catholic / total * 100,
+    protestant_pct = protestant / total * 100,
+    classification = case_when(
+      catholic_pct > 50 ~ "Mayoría católica",
+      catholic > protestant ~ "Pluralidad católica",
+      protestant_pct > 50 ~ "Mayoría protestante",
+      protestant > catholic ~ "Pluralidad protestante",
+      TRUE ~ "Empate"
+    )
+  )
+```
+
+```{r}
+# 3. Cargar religión o religión de crianza 2021
+religion_brought <- read_excel(
+  "C:/Users/gonza/Documents/Irlanda del Norte/Census2021_ religion brought up in.xlsx",
+  sheet = "Table",
+  skip = 4
+) %>%
+  rename(
+    dea_code = `District Electoral Area 2014 Code`,
+    dea_name = `District Electoral Area 2014 Label`,
+    catholic = Catholic,
+    protestant = `Protestant and Other Christian (including Christian related)`,
+    other = `Other religions`,
+    no_religion = `None`
+  ) %>%
+  mutate(
+    total = catholic + protestant + other + no_religion,
+    catholic_pct = catholic / total * 100,
+    protestant_pct = protestant / total * 100,
+    classification = case_when(
+      catholic_pct > 50 ~ "Mayoría católica",
+      catholic > protestant ~ "Pluralidad católica",
+      protestant_pct > 50 ~ "Mayoría protestante",
+      protestant > catholic ~ "Pluralidad protestante",
+      TRUE ~ "Empate"
+    )
+  )
+```
+
+```{r}
+# 4. Unir mapas
+map_actual <- dea_mapa %>%
+  left_join(
+    religion_actual,
+    by = c("DEA2014_cd" = "dea_code")
+  )
+
+map_brought <- dea_mapa %>%
+  left_join(
+    religion_brought,
+    by = c("DEA2014_cd" = "dea_code")
+  )
+```
+
+```{r}
+# 5. Comprobar unión
+map_actual %>%
+  summarise(
+    total_dea = n(),
+    con_datos = sum(!is.na(classification)),
+    sin_datos = sum(is.na(classification))
+  )
+
+map_brought %>%
+  summarise(
+    total_dea = n(),
+    con_datos = sum(!is.na(classification)),
+    sin_datos = sum(is.na(classification))
+  )
+```
+
+```{r}
+# 6. Función para mapa DEA
+hacer_mapa_dea <- function(data, mostrar_leyenda = TRUE) {
+
+  ggplot() +
+    geom_sf(
+      data = data,
+      aes(fill = classification),
+      color = "grey30",
+      linewidth = 0.15
+    ) +
+    geom_sf(
+      data = st_union(data),
+      fill = NA,
+      color = "grey20",
+      linewidth = 0.35
+    ) +
+    scale_fill_manual(
+      values = c(
+        "Mayoría católica" = "#A50F15",
+        "Pluralidad católica" = "#FCBBA1",
+        "Pluralidad protestante" = "#BDE0FE",
+        "Mayoría protestante" = "#0077B6"
+      ),
+      breaks = c(
+        "Mayoría católica",
+        "Pluralidad católica",
+        "Pluralidad protestante",
+        "Mayoría protestante"
+      ),
+      name = NULL
+    ) +
+    coord_sf(datum = NA) +
+    theme_void() +
+    theme(
+      legend.position = if(mostrar_leyenda) c(0.05, 0.95) else "none",
+      legend.justification = c(0, 1),
+      legend.background = element_rect(fill = "white", colour = NA),
+      legend.text = element_text(size = 6),
+      legend.key.size = unit(0.25, "cm"),
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+```
+
+```{r}
+p_actual <- hacer_mapa_dea(
+  map_actual,
+  mostrar_leyenda = TRUE
+)
+
+p_brought <- hacer_mapa_dea(
+  map_brought,
+  mostrar_leyenda = FALSE
+)
+```
+
+```{r}
+# 8. Mostrar los dos mapas juntos
+grid.arrange(
+  p_actual,
+  p_brought,
+  ncol = 2,
+  top = "Religión actual vs religión de crianza"
+)
+```
+
+```{r}
+png(
+  "religion_vs_brought_up_dea_2021.png",
+  width = 3000,
+  height = 1500,
+  res = 300
+)
+
+grid.arrange(
+  p_actual,
+  p_brought,
+  ncol = 2,
+  top = "Religión actual vs religión de crianza"
+)
+
+dev.off()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```

@@ -1,0 +1,174 @@
+---
+title: "Untitled"
+author: "Gonzalo Salomoni"
+date: "2026-06-04"
+output: html_document
+---
+
+```r}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(ggplot2)
+```
+
+```{r}
+# 1. Cargar mapa de wards
+wards_mapa <- st_read(
+  "C:/Users/gonza/Documents/Irlanda del Norte/osni_open_data_largescale_boundaries_wards_2012.geojson",
+  quiet = TRUE
+)
+```
+
+```{r}
+# Cargar datos: religion brought up in
+wards_brought <- read_excel(
+  "C:/Users/gonza/Documents/Modifis_Irlanda del Norte/Wards religioun brought up in.xlsx",
+  skip = 1
+) %>%
+  rename(
+    ward = Geography,
+    code = `Geography code`,
+    total = `All usual residents`,
+    catholic = `Catholic`,
+    protestant = `Protestant and Other Christian (including Christian related)`,
+    other_religions = `Other religions`,
+    no_religion = `None`
+  ) %>%
+  mutate(
+    catholic_pct = catholic * 100,
+    protestant_pct = protestant * 100,
+    
+    # Diferencia: positivo = católico, negativo = protestante
+    diff_cat_prot = catholic_pct - protestant_pct
+  )
+```
+
+```{r}
+# Unir mapa + datos
+wards_geo <- wards_mapa %>%
+  left_join(
+    wards_brought,
+    by = c("WardCode" = "code")
+  )
+```
+
+```{r}
+# Comprobar unión
+wards_geo <- wards_geo %>%
+  mutate(
+    diff_abs = abs(catholic_pct - protestant_pct),
+
+    categoria = case_when(
+      catholic_pct > protestant_pct & diff_abs <= 30 ~ "More Catholic than Protestant\n0% - 30%",
+      catholic_pct > protestant_pct & diff_abs <= 60 ~ "More Catholic than Protestant\n30% - 60%",
+      catholic_pct > protestant_pct & diff_abs > 60  ~ "More Catholic than Protestant\n> 60%",
+
+      protestant_pct > catholic_pct & diff_abs <= 30 ~ "More Protestant than Catholic\n0% - 30%",
+      protestant_pct > catholic_pct & diff_abs <= 60 ~ "More Protestant than Catholic\n30% - 60%",
+      protestant_pct > catholic_pct & diff_abs > 60  ~ "More Protestant than Catholic\n> 60%",
+
+      TRUE ~ "Equal"
+    )
+  )
+```
+
+```{r}
+map_brought_up_cat <- ggplot() +
+  geom_sf(
+    data = wards_geo,
+    aes(fill = categoria),
+    color = NA
+  ) +
+  geom_sf(
+    data = st_union(wards_geo),
+    fill = NA,
+    color = "grey30",
+    linewidth = 0.35
+  ) +
+  scale_fill_manual(
+    values = c(
+      "More Catholic than Protestant\n0% - 30%" = "#FCBBA1",
+      "More Catholic than Protestant\n30% - 60%" = "#EF3B2C",
+      "More Catholic than Protestant\n> 60%" = "#A50F15",
+
+      "More Protestant than Catholic\n0% - 30%" = "#9ECAE1",
+      "More Protestant than Catholic\n30% - 60%" = "#08519C",
+      "More Protestant than Catholic\n> 60%" = "#08519C",
+
+      "Equal" = "grey85"
+    ),
+    breaks = c(
+      "More Catholic than Protestant\n0% - 30%",
+      "More Catholic than Protestant\n30% - 60%",
+      "More Catholic than Protestant\n> 60%",
+      "More Protestant than Catholic\n0% - 30%",
+      "More Protestant than Catholic\n30% - 60%",
+      "More Protestant than Catholic\n> 60%"
+    ),
+    labels = c(
+      "0% - 30%",
+      "30% - 60%",
+      "> 60%",
+      "0% - 30%",
+      "30% - 60%",
+      "> 60%"
+    ),
+    name = NULL
+  ) +
+  labs(
+    title = "Origenes religiosos en el censo de 2021"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(
+      hjust = 0.5,
+      size = 20,
+      face = "plain"
+    ),
+    legend.position = c(0.12, 0.86),
+    legend.direction = "vertical",
+    legend.text = element_text(size = 7),
+    legend.key.size = unit(0.35, "cm")
+  ) +
+  annotate(
+    "text",
+    x = -Inf, y = Inf,
+    label = "Más católicos que protestantes",
+    hjust = -0.2, vjust = 1.5,
+    size = 3
+  ) +
+  annotate(
+    "text",
+    x = -Inf, y = Inf,
+    label = "Más protestantes que católicos",
+    hjust = -0.2, vjust = 6.2,
+    size = 3
+  )
+
+map_brought_up_cat
+
+
+```
+
+```{r}
+ggsave(
+  "religion_brought_up_wards_2021.png",
+  plot = map_brought_up_cat,
+  width = 9,
+  height = 7,
+  dpi = 300
+)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
